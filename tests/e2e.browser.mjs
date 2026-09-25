@@ -61,10 +61,6 @@ for (let i = 1; i <= pdf.numPages; i++) {
 assert.equal(chars, 0, "downloaded PDF should have no extractable text");
 await download.delete();
 
-app.external.splice(0, app.external.length, ...app.external.filter((u) => !u.startsWith("edge://")));
 await app.finish();
-
-
-
-
 process.exit(0);
+
