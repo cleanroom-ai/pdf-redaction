@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' blob: 'wasm-unsafe-eval'; worker-src 'self' blob:; connect-src 'self' blob: data:; img-src 'self' blob: data:; style-src 'self'; font-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <meta name="referrer" content="no-referrer">
+  <title>PDF Redactor — truly redact PDFs in your browser</title>
+  <meta name="description" content="Detect, review, burn in black redaction boxes and export flattened PDFs with zero hidden text. Runs entirely in your browser.">
+  <link rel="icon" href="favicon.ico" sizes="48x48">
+  <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="assets/apple-touch-icon.png">
+  <link rel="manifest" href="assets/site.webmanifest">
+  <meta name="theme-color" content="#1e1b4b">
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="PDF Redactor">
+  <meta property="og:description" content="Truly redact PDFs: flatten, verify, in-browser.">
+  <meta property="og:url" content="https://huggingface.co/spaces/cleanroom-ai/pdf-redaction">
+  <meta property="og:image" content="https://cleanroom-ai-pdf-redaction.static.hf.space/assets/social-preview.png">
+  <meta property="og:image:width" content="1280">
+  <meta property="og:image:height" content="640">
+  <meta name="twitter:card" content="summary_large_image">
+  <link rel="stylesheet" href="vendor/core/theme.css">
+  <link rel="stylesheet" href="style.css">
+  <script type="module" src="js/app.js"></script>
+</head>
+<body>
+  <header class="top">
+    <div class="brand">
+      <img class="logo" src="assets/icon.svg" width="40" height="40" alt="">
+      <div>
+        <h1>PDF Redactor <a class="family" href="https://github.com/paragpsawant" target="_blank" rel="noopener noreferrer">cleanroom-ai</a></h1>
+        <p class="tag">Truly redact PDFs — in your browser. Nothing uploaded.</p>
+      </div>
+    </div>
+    <p class="privacy" title="All processing happens on your device. The app only downloads its own code and models and never sends data anywhere.">
+      🔒 Runs 100% in your browser. Your file is never uploaded.
+    </p>
+  </header>
+
+  <main>
+    <section id="drop" class="drop" tabindex="0" role="button" aria-label="Choose, drop or paste a PDF">
+      <input id="file" type="file" accept="application/pdf,.pdf" hidden>
+      <div class="drop-inner">
+        <div class="drop-icon" aria-hidden="true">⬆</div>
+        <p class="drop-title">Paste a PDF, drop it here, or click to choose</p>
+        <p class="drop-sub">Finds secrets and PII in real PDF text and scanned pages, lets you review, then exports a flattened PDF with black boxes burned in.</p>
+        <div class="examples" aria-label="Synthetic examples">
+          <span>Try an example (fake data):</span>
+          <button type="button" data-example="examples/fake-invoice.pdf">Invoice / HR letter</button>
+          <button type="button" data-example="examples/scanned-letter.pdf">Scanned PDF</button>
+          <button type="button" data-example="examples/hidden-text-trap.pdf">Hidden text trap</button>
+        </div>
+      </div>
+    </section>
+
+    <section id="workspace" class="workspace" hidden>
+      <aside class="pages card" aria-label="Pages">
+        <div class="card-head"><h2>Pages</h2><span id="page-count" class="mini"></span></div>
+        <div id="thumbs" class="thumbs"></div>
+      </aside>
+
+      <div class="viewer">
+        <div class="toolbar">
+          <div class="page-nav">
+            <button id="prev-page" type="button">← Prev</button>
+            <span id="page-label">Page 1</span>
+            <button id="next-page" type="button">Next →</button>
+          </div>
+          <div class="actions">
+            <button id="download" type="button" class="primary">Download redacted PDF</button>
+          </div>
+        </div>
+        <p id="status" class="status" role="status" aria-live="polite"></p>
+        <p class="hint">Numbered boxes are what will be blacked out. <strong>Drag on the page to add a box.</strong> Only black boxes are offered because blur/pixelation can be reversed and true redaction must destroy content.</p>
+        <div class="canvas-wrap">
+          <canvas id="review" class="drawable" aria-label="PDF page with detection overlay; drag to add a box"></canvas>
+        </div>
+      </div>
+
+      <aside class="side">
+        <div class="card">
+          <div class="card-head">
+            <h2>Redactions</h2>
+            <span class="mini"><button id="select-all" type="button">all</button> · <button id="select-none" type="button">none</button></span>
+          </div>
+          <ul id="detections" class="detections"></ul>
+          <p id="detections-empty" class="muted">Nothing on this page yet.</p>
+        </div>
+
+        <details class="card" open>
+          <summary><h2>What to look for</h2></summary>
+          <div id="categories" class="categories"></div>
+          <label class="field">Also hide these words <span class="muted">(comma-separated)</span>
+            <input id="terms" type="text" placeholder="e.g. Contoso, Project Falcon, payroll" autocomplete="off">
+          </label>
+          <label class="check"><input id="use-ner" type="checkbox" checked> Use the on-device name/address model <span class="muted">(one-time model load)</span></label>
+          <button id="rescan" type="button" class="primary wide">Scan again</button>
+        </details>
+
+        <div class="card">
+          <h2>Verification</h2>
+          <p id="verify" class="muted">Export a redacted PDF to verify that no text layer remains.</p>
+          <p id="report" class="report"></p>
+        </div>
+
+        <button id="reset" type="button" class="wide ghost">← New PDF</button>
+      </aside>
+    </section>
+  </main>
+
+  <footer>
+    <p id="engine" class="engine">Starting engine…</p>
+    <p class="muted">PDF.js renders pages locally. OCR: PP-OCRv6 · Names/addresses: bert-small-pii · Export: flattened page images via pdf-lib. Always review before sharing.</p>
+    <p class="muted">Built by <a href="https://github.com/paragpsawant" target="_blank" rel="noopener noreferrer">Parag Sawant</a> · <a href="https://github.com/paragpsawant/pdf-redaction" target="_blank" rel="noopener noreferrer">Source on GitHub</a> · part of cleanroom-ai · Apache-2.0</p>
+  </footer>
+</body>
+</html>
