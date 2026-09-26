@@ -10,7 +10,7 @@
     "serve": "node node_modules/@cleanroom-ai/core/scripts/serve.mjs ."
   },
   "dependencies": {
-    "@cleanroom-ai/core": "github:cleanroom-ai/cleanroom-core#v0.1.5",
+    "@cleanroom-ai/core": "github:cleanroom-ai/cleanroom-core#v0.1.6",
     "pdf-lib": "1.17.1",
     "pdfjs-dist": "6.3.289"
   },
