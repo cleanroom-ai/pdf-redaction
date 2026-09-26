@@ -2,7 +2,7 @@ import * as ort from "../vendor/ort/ort.wasm.min.mjs";
 import { createEngineCache, configureOrt } from "../vendor/core/engines.js";
 import { scan } from "../vendor/core/pipeline.js";
 import { findSpans, mergeSpans } from "../vendor/core/rules.js";
-import { rowSpanBox } from "./pdf-text.js";
+import { detectorRows, mergeDetectionsByOverlap, rowSpanBox } from "./pdf-text.js";
 
 const BASE = new URL("../", import.meta.url);
 const WASM_PATH = new URL("vendor/ort/", BASE).href;
@@ -38,15 +38,8 @@ self.onmessage = async ({ data: msg }) => {
           return null;
         });
       }
-      const detections = [];
       let timings = { rules: 0 };
-      for (const row of msg.rows) {
-        const ruleSpans = findSpans(row.text, [...cats], msg.options.customTerms || []);
-        const nerSpans = ner ? await ner.find(row.text, nerCats) : [];
-        for (const s of mergeSpans(ruleSpans, nerSpans)) {
-          detections.push({ category: s.category, label: s.label, box: rowSpanBox(row, s.start, s.end), score: s.score, source: s.source, text: row.text.slice(s.start, s.end) });
-        }
-      }
+      const detections = await detectRows(msg.rows, msg.options, ner, cats, nerCats);
       timings.rules = performance.now() - t0;
       post({ type: "result", id: msg.id, detections, timings, lines: msg.rows.length });
       return;
@@ -62,9 +55,27 @@ self.onmessage = async ({ data: msg }) => {
         });
       }
       const result = await scan(msg.image, engines, { ...msg.options, onProgress: (text) => post({ type: "progress", id: msg.id, text }) });
+      if (result.lines?.length) {
+        const cats = new Set(msg.options.categories);
+        const nerCats = new Set([...cats].filter((c) => ["person", "location", "government_id", "financial"].includes(c)));
+        const extra = await detectRows(result.lines, msg.options, engines.ner, cats, nerCats);
+        result.detections = mergeDetectionsByOverlap([...(result.detections || []), ...extra]);
+      }
       post({ type: "result", id: msg.id, detections: result.detections, timings: result.timings, lines: result.lines.length });
     }
   } catch (err) {
     post({ type: "error", id: msg.id, text: err?.message || String(err) });
   }
 };
+
+async function detectRows(rows, options, ner, cats = new Set(options.categories), nerCats = new Set()) {
+  const detections = [];
+  for (const row of detectorRows(rows)) {
+    const ruleSpans = findSpans(row.text, [...cats], options.customTerms || []);
+    const nerSpans = ner ? await ner.find(row.text, nerCats) : [];
+    for (const s of mergeSpans(ruleSpans, nerSpans)) {
+      detections.push({ category: s.category, label: s.label, box: rowSpanBox(row, s.start, s.end), score: s.score, source: s.source, text: row.text.slice(s.start, s.end) });
+    }
+  }
+  return mergeDetectionsByOverlap(detections);
+}

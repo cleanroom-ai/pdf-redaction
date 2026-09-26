@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import * as pdfjsLib from "pdfjs-dist/legacy/build/pdf.mjs";
 import { findSpans } from "@cleanroom-ai/core/src/rules.js";
-import { textItemsToLines, itemToLine, groupTextItems, rowSpanBox } from "../js/pdf-text.js";
+import { detectorRows, textItemsToLines, itemToLine, groupTextItems, rowSpanBox } from "../js/pdf-text.js";
 import { createRedactedPdf, PDF_PRODUCER } from "../js/export-pdf.js";
 import { countExtractableText } from "../js/verify.js";
 import { PDFDocument } from "pdf-lib";
@@ -31,6 +31,30 @@ test("groups neighboring text items into lines", () => {
   ]);
   assert.equal(lines.length, 2);
   assert.equal(lines[0].text, "Email: ava@example.test");
+});
+
+test("detector rows join adjacent split secrets and map boxes to both parts", () => {
+  const first = { text: "Token: " + "gh" + "p_QAedgeToken123456", box: { x0: 10, y0: 10, x1: 210, y1: 30 }, bounds: [], index: 1 };
+  const second = { text: "7890abcdefABCD1234567890", box: { x0: 10, y0: 38, x1: 250, y1: 58 }, bounds: [], index: 2 };
+  const rows = detectorRows([
+    { text: first.text, box: first.box, parts: [{ line: first, offset: 0 }] },
+    { text: second.text, box: second.box, parts: [{ line: second, offset: 0 }] },
+  ]);
+  const detections = rows.flatMap((row) => findSpans(row.text).map((s) => ({ row, span: s })));
+  const hit = detections.find((d) => d.span.label === "GITHUB_TOKEN");
+  assert.ok(hit, "split GitHub token should be detected in a joined detector row");
+  const box = rowSpanBox(hit.row, hit.span.start, hit.span.end);
+  assert.ok(box.y0 <= first.box.y0 && box.y1 >= second.box.y1, `box should cover both lines: ${JSON.stringify(box)}`);
+});
+
+test("detector rows join wrapped email columns without injecting spaces", () => {
+  const a = { text: "wrap.split@", box: { x0: 10, y0: 10, x1: 110, y1: 30 }, bounds: [], index: 1 };
+  const b = { text: "example.test", box: { x0: 360, y0: 10, x1: 470, y1: 30 }, bounds: [], index: 2 };
+  const rows = detectorRows([a, b]);
+  const hit = rows.flatMap((row) => findSpans(row.text).map((s) => ({ row, span: s }))).find((d) => d.span.label === "EMAIL");
+  assert.ok(hit, "split email should be detected across adjacent columns");
+  const box = rowSpanBox(hit.row, hit.span.start, hit.span.end);
+  assert.ok(box.x0 <= a.box.x0 && box.x1 >= b.box.x1);
 });
 
 test("detects rule-based PII in text-layer examples", async () => {
@@ -73,4 +97,3 @@ test("redacted export is flattened, textless, and strips metadata", async () => 
   const raw = Buffer.from(bytes).toString("latin1");
   assert.doesNotMatch(raw, /\/Title|\/Author|\/Subject|\/Keywords/);
 });
-

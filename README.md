@@ -48,20 +48,20 @@ Drawing black rectangles over a PDF often leaves the original text selectable an
 
 - Drop, choose, paste, or open bundled fake example PDFs.
 - Detects emails, phones, SSNs, cards, IBANs, bank/routing numbers, secrets, names, addresses, dates, IPs, and custom terms.
-- Uses PDF.js text extraction when available; falls back to in-browser PP-OCRv6 for scanned pages.
+- Uses PDF.js text extraction and also OCRs each rendered page, so image text, form appearances, and annotations on text-layer pages can be reviewed.
 - Optional in-browser PII name/address model.
 - Page thumbnails, numbered review boxes, checkboxes, and manual drag-to-redact boxes.
 - Exports with pdf-lib as flattened page images.
-- Re-opens the export with PDF.js and shows `✓ Verified: 0 characters of text remain`.
+- Re-opens the export with PDF.js and OCR; `✓ Verified` is shown only when no text layer or OCR-visible selected sensitive content remains.
 - Strict CSP, no CDN, no analytics, no uploads.
 
 ## How it works
 
 ```
 PDF ─► PDF.js render + text layer ─► rules + optional PII model ─┐
-    └─► OCR fallback for scanned pages ───────────────────────────┤
+    └─► OCR pass on the rendered page image ──────────────────────┤
             character spans → page pixel boxes → review → burn black boxes
-            → pdf-lib image-only PDF → PDF.js verification (zero text)
+            → pdf-lib image-only PDF → PDF.js + OCR verification
 ```
 
 Only black boxes are offered because blur and pixelation can sometimes be reversed for text.

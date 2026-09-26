@@ -1,7 +1,7 @@
 import * as pdfjsLib from "../vendor/pdfjs/pdf.min.mjs";
 import { CATEGORY_COLORS, renderReview } from "../vendor/core/redact.js";
 import { CATEGORIES, DEFAULT_CATEGORIES, maskPreview, prettyLabel } from "../vendor/core/rules.js";
-import { renderPdfPage, renderScaleForPage, textItemsToLines } from "./pdf-text.js";
+import { mergeDetectionsByOverlap, renderPdfPage, renderScaleForPage, textItemsToLines } from "./pdf-text.js";
 import { buildRedactedPdfFromState } from "./export-pdf.js";
 import { countExtractableText } from "./verify.js";
 
@@ -109,7 +109,7 @@ async function loadPdfBytes(buffer, name) {
       setStatus(`Rendering page ${i} of ${pdf.numPages}…`, "busy");
       const pdfPage = await pdf.getPage(i);
       const view1 = pdfPage.getViewport({ scale: 1 });
-      const { canvas, viewport } = await renderPdfPage(pdfPage, renderScaleForPage(pdfPage));
+      const { canvas, viewport } = await renderPdfPage(pdfPage, renderScaleForPage(pdfPage), pdfjsLib);
       const textContent = await pdfPage.getTextContent({ disableNormalization: false });
       const rows = textItemsToLines(textContent, viewport, pdfjsLib);
       const page = { number: i, canvas, widthPt: view1.width, heightPt: view1.height, rows, detections: [], timings: {}, mode: "text" };
@@ -126,34 +126,40 @@ async function loadPdfBytes(buffer, name) {
   } finally {
     state.busy = false;
     els.rescan.disabled = false;
+    if (state.pages.length) render();
   }
 }
 
 function resetState() {
   state.pages = []; state.selected = new Set(); state.nextId = 1; state.current = 0; state.lastScanMs = 0;
   els.thumbs.replaceChildren(); els.list.replaceChildren(); els.report.textContent = ""; els.file.value = "";
+  els.download.disabled = true; els.rescan.disabled = true;
 }
 
 async function scanPage(page, index = page.number, total = state.pages.length) {
   const options = currentOptions();
   const textChars = page.rows.reduce((n, r) => n + r.text.trim().length, 0);
-  let result;
+  let textResult = null;
   if (textChars >= MIN_TEXT_CHARS) {
-    page.mode = "text";
+    page.mode = "text+ocr";
     setStatus(`Scanning text layer on page ${index} of ${total}…`, "busy");
-    result = await workerCall({ type: "scanText", rows: page.rows, options });
+    textResult = await workerCall({ type: "scanText", rows: page.rows, options });
   } else {
     page.mode = "ocr";
-    setStatus(`No usable text layer on page ${index}; running OCR…`, "busy");
-    const ctx = page.canvas.getContext("2d", { willReadFrequently: true });
-    const image = ctx.getImageData(0, 0, page.canvas.width, page.canvas.height);
-    result = await workerCall({ type: "scanImage", image: { data: image.data, width: image.width, height: image.height }, options }, [image.data.buffer]);
   }
-  page.timings = result.timings || {};
-  page.lines = result.lines || page.rows.length;
+  setStatus(`${textChars >= MIN_TEXT_CHARS ? "Running OCR pass" : "No usable text layer; running OCR"} on page ${index} of ${total}…`, "busy");
+  const image = pageImageData(page);
+  const ocrResult = await workerCall({ type: "scanImage", image: { data: image.data, width: image.width, height: image.height }, options }, [image.data.buffer]);
+  page.timings = { text: textResult?.timings?.rules || 0, ...(ocrResult.timings || {}) };
+  page.lines = (textResult?.lines || 0) + (ocrResult.lines || 0);
   const manual = page.detections.filter((d) => d.source === "you");
-  page.detections = [...(result.detections || []), ...manual].map((d) => ({ ...d, page: page.number, id: state.nextId++ }));
+  page.detections = [...mergeDetectionsByOverlap([...(textResult?.detections || []), ...(ocrResult.detections || [])]), ...manual].map((d) => ({ ...d, page: page.number, id: state.nextId++ }));
   for (const d of page.detections) state.selected.add(d.id);
+}
+
+function pageImageData(page) {
+  const ctx = page.canvas.getContext("2d", { willReadFrequently: true });
+  return ctx.getImageData(0, 0, page.canvas.width, page.canvas.height);
 }
 
 function currentOptions() {
@@ -174,7 +180,7 @@ els.rescan.addEventListener("click", async () => {
     state.lastScanMs = performance.now() - t0;
     render(); setStatus(scanSummary(), "ok"); setVerify("Export a redacted PDF to verify that no text layer remains.");
   } catch (err) { setStatus(`Scan failed: ${err.message}`, "warn"); }
-  finally { state.busy = false; els.rescan.disabled = false; }
+  finally { state.busy = false; els.rescan.disabled = false; render(); }
 });
 
 function makeThumbs() {
@@ -260,17 +266,46 @@ els.download.addEventListener("click", async () => {
   setStatus("Flattening redacted pages into a new PDF…", "busy");
   try {
     const bytes = await buildRedactedPdfFromState(state.pages, state.selected);
-    setStatus("Verifying exported PDF has no text layer…", "busy");
-    const verified = await countExtractableText(pdfjsLib, bytes.slice());
-    if (verified.chars === 0) setVerify("✓ Verified: 0 characters of text remain", "ok");
-    else setVerify(`⚠ Verification found ${verified.chars} extractable characters`, "warn");
+    const verified = await verifyExportedPdf(bytes);
+    if (verified.chars === 0 && verified.detections.length === 0) {
+      setVerify("✓ Verified: 0 characters of text remain and OCR found no sensitive content", "ok");
+    } else {
+      setVerify(`⚠ Verification warning: ${verificationSummary(verified)}`, "warn");
+    }
     const url = URL.createObjectURL(new Blob([bytes], { type: "application/pdf" }));
     const a = Object.assign(document.createElement("a"), { href: url, download: `${state.fileName}-redacted.pdf` });
     a.click(); setTimeout(() => URL.revokeObjectURL(url), 5000);
-    setStatus(`Downloaded flattened PDF. ${verified.chars === 0 ? "Verified no extractable text remains." : "Review the warning."}`, verified.chars === 0 ? "ok" : "warn");
+    const clean = verified.chars === 0 && verified.detections.length === 0;
+    setStatus(`Downloaded flattened PDF. ${clean ? "Verified no text or OCR-visible sensitive content remains." : "Review the verification warning."}`, clean ? "ok" : "warn");
   } catch (err) { setStatus(`Export failed: ${err.message}`, "warn"); }
   finally { state.busy = false; els.download.disabled = false; }
 });
+
+async function verifyExportedPdf(bytes) {
+  setStatus("Verifying exported PDF has no text layer…", "busy");
+  const text = await countExtractableText(pdfjsLib, bytes.slice());
+  const pdf = await pdfjsLib.getDocument({ data: bytes.slice(), isEvalSupported: false, disableFontFace: true, useSystemFonts: true, cMapUrl: "vendor/pdfjs/cmaps/", cMapPacked: true, standardFontDataUrl: "vendor/pdfjs/standard_fonts/" }).promise;
+  const detections = [];
+  for (let i = 1; i <= pdf.numPages; i++) {
+    setStatus(`OCR-verifying exported page ${i} of ${pdf.numPages}…`, "busy");
+    const pdfPage = await pdf.getPage(i);
+    const { canvas } = await renderPdfPage(pdfPage, renderScaleForPage(pdfPage), pdfjsLib);
+    const image = pageImageData({ canvas });
+    const result = await workerCall({ type: "scanImage", image: { data: image.data, width: image.width, height: image.height }, options: currentOptions() }, [image.data.buffer]);
+    for (const d of result.detections || []) detections.push({ ...d, page: i });
+  }
+  return { pages: text.pages, chars: text.chars, detections };
+}
+
+function verificationSummary(verified) {
+  const bits = [];
+  if (verified.chars) bits.push(`${verified.chars} extractable character${verified.chars === 1 ? "" : "s"}`);
+  if (verified.detections.length) {
+    const shown = verified.detections.slice(0, 5).map((d) => `p${d.page} ${prettyLabel(d.label)} ${maskPreview(d.text || "")}`).join("; ");
+    bits.push(`${verified.detections.length} OCR-visible detection${verified.detections.length === 1 ? "" : "s"} remain (${shown}${verified.detections.length > 5 ? "; …" : ""})`);
+  }
+  return bits.join(" and ");
+}
 
 function scanSummary() {
   const count = state.pages.reduce((n, p) => n + p.detections.filter((d) => d.source !== "you").length, 0);
