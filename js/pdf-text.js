@@ -13,7 +13,9 @@ export async function renderPdfPage(page, scale = renderScaleForPage(page), pdfj
   const ctx = canvas.getContext("2d", { willReadFrequently: true, alpha: false });
   ctx.fillStyle = "#fff";
   ctx.fillRect(0, 0, canvas.width, canvas.height);
-  const annotationMode = pdfjsLib?.AnnotationMode?.ENABLE_FORMS ?? 2;
+  // ENABLE_STORAGE draws filled form-field values into the canvas (ENABLE_FORMS leaves widgets to an
+  // HTML form layer), so OCR sees them and the flattened export redacts them instead of dropping them.
+  const annotationMode = pdfjsLib?.AnnotationMode?.ENABLE_STORAGE ?? 3;
   await page.render({ canvasContext: ctx, viewport, annotationMode }).promise;
   return { canvas, viewport, scale };
 }

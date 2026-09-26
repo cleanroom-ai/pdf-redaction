@@ -102,6 +102,25 @@ try {
   assert.match(await page.locator("#verify").innerText(), /OCR-visible detection/);
   await mixedDownload.delete();
 
+  // Filled AcroForm fields are rendered into the page, detected by OCR, and redacted (not silently dropped).
+  const formPdf = await PDFDocument.create();
+  const formPage = formPdf.addPage([612, 300]);
+  const formFont = await formPdf.embedFont(StandardFonts.Helvetica);
+  formPage.drawText("Contact form:", { x: 48, y: 240, size: 16, font: formFont });
+  const field = formPdf.getForm().createTextField("contact_email");
+  field.setText("form.leak@example.test");
+  field.addToPage(formPage, { x: 48, y: 170, width: 420, height: 40, font: formFont });
+  field.setFontSize(22);
+  formPdf.getForm().updateFieldAppearances(formFont);
+  const formFile = join(shotsDir, "filled-acroform.pdf");
+  writeFileSync(formFile, await formPdf.save());
+  await page.locator("#reset").click().catch(() => {});
+  await page.setInputFiles("#file", formFile);
+  await page.locator("#status[data-kind=ok], #status[data-kind=warn]").waitFor({ timeout: 180_000 });
+  const formItems = await labels();
+  assert.ok(formItems.some((i) => i.includes("Email")), `filled form field email should be detected; saw ${formItems.join(" | ")}`);
+  console.log("filled AcroForm field: email detected");
+
   await app.finish();
   finished = true;
 
