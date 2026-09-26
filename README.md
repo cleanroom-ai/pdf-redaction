@@ -7,7 +7,7 @@ sdk: static
 app_file: index.html
 pinned: false
 license: apache-2.0
-short_description: Truly redact PDFs: flatten, verify, in-browser
+short_description: "Truly redact PDFs: flatten, verify, in-browser"
 thumbnail: https://huggingface.co/spaces/cleanroom-ai/pdf-redaction/resolve/main/assets/social-preview.png
 models:
   - onnx-community/bert-small-pii-detection-ONNX
