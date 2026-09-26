@@ -1,11 +1,11 @@
 ---
 title: PDF Redactor
-emoji: 🧼
-colorFrom: gray
-colorTo: indigo
+emoji: 📄
+colorFrom: red
+colorTo: gray
 sdk: static
 app_file: index.html
-pinned: false
+pinned: true
 license: apache-2.0
 short_description: "Truly redact PDFs: flatten, verify, in-browser"
 thumbnail: https://huggingface.co/spaces/cleanroom-ai/pdf-redaction/resolve/main/assets/social-preview.png
