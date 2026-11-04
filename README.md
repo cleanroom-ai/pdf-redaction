@@ -68,6 +68,8 @@ Only black boxes are offered because blur and pixelation can sometimes be revers
 
 ## Run locally
 
+Requires Node.js 26 (Active LTS; see `.nvmrc`).
+
 ```bash
 npm ci
 npm run vendor
@@ -85,7 +87,7 @@ npm run examples
 
 ## CI/CD
 
-CI installs Node 24, vendors all runtime libraries and models locally, runs Node tests, then runs a real-browser E2E test that fails on third-party requests or uploads. The deploy workflow uploads the static app to the Hugging Face Space only when `HF_TOKEN` is configured by the publisher.
+CI installs Node 26, vendors all runtime libraries and models locally, runs Node tests, then runs a real-browser E2E test that fails on third-party requests or uploads. The deploy workflow uploads the static app to the Hugging Face Space only when `HF_TOKEN` is configured by the publisher.
 
 ## Limitations
 
